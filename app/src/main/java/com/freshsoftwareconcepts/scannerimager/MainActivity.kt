@@ -1,14 +1,21 @@
 package com.freshsoftwareconcepts.scannerimager
 
+import android.os.AsyncTask
 import android.os.Bundle
 import android.support.v7.app.AppCompatActivity
+import android.view.KeyEvent
 import android.view.View
-import android.widget.*
+import android.view.inputmethod.EditorInfo
+import android.widget.EditText
+import android.widget.ListView
+import android.widget.SimpleAdapter
+import android.widget.TextView
 import java.util.*
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : AppCompatActivity(), ScannerListener {
     private var scanner: ScannerController? = null
-    private val tvStatus: TextView by lazy { this.findViewById<TextView>(R.id.tvStatus) }
+    private val tvStatus: TextView? by lazy { this.findViewById<TextView>(R.id.tvStatus) }
+    private val etBarcode: EditText? by lazy { this.findViewById<EditText>(R.id.etBarcode) }
     private val lvBarcode: ListView by lazy { this.findViewById<ListView>(R.id.lvBarcode) }
     private val parentLayout: View by lazy { this.findViewById<View>(android.R.id.content) }
     private val lstBarcode: ArrayList<Map<String, String>> by lazy { ArrayList<Map<String, String>>() }
@@ -24,28 +31,36 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        try {
-            super.onCreate(savedInstanceState)
-            this.setContentView(R.layout.activity_main)
+        super.onCreate(savedInstanceState)
 
-            this.scanner = ScannerController(this)
-            /*
-        this.lstBarcode.add(mapOf("barcode" to "1.25.68.1.A.37365", "type" to "Unloading chart"))
-        this.lstBarcode.add(mapOf("barcode" to "1.25.68.1.S.72734", "type" to "Loading chart"))
-        this.lstBarcode.add(mapOf("barcode" to "00100341", "type" to "Pallet tag old"))
-        this.lstBarcode.add(mapOf("barcode" to "02.503932.1", "type" to "Pallet tag"))
-        this.lstBarcode.add(mapOf("barcode" to "1.1.A", "type" to "Rack"))
-        */
-            this.setAdapter()
-        } catch (e: Exception) {
-            Toast.makeText(this, "10 ${e.message}", Toast.LENGTH_SHORT).show()
+        this.scanner = ScannerController.getInstance(this)
+        this.setContentView(if (this.scanner == null) {
+            R.layout.activity_main
+        } else {
+            R.layout.activity_scanner_main
+        })
+
+        with(this.etBarcode) {
+            this?.setOnKeyListener { _, keyCode, keyEvent ->
+                if (keyEvent.action == KeyEvent.ACTION_UP && (keyCode == KeyEvent.KEYCODE_ENTER || keyCode == KeyEvent.KEYCODE_REFRESH) && !this.text.isNullOrEmpty()) {
+                    AsyncDataUpdate().execute(this.text.toString().trim())
+                    return@setOnKeyListener true
+                }
+
+                return@setOnKeyListener false
+            }
+
+            this?.setOnEditorActionListener { _, actionId, _ ->
+                if (actionId == EditorInfo.IME_ACTION_DONE && !this.text.isNullOrEmpty()) {
+                    AsyncDataUpdate().execute(this.text.toString().trim())
+                    return@setOnEditorActionListener true
+                }
+
+                return@setOnEditorActionListener false
+            }
         }
-    }
 
-    override fun onDestroy() {
-        super.onDestroy()
-
-        this.scanner?.release()
+        this.setAdapter()
     }
 
     override fun onPause() {
@@ -58,5 +73,48 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
 
         this.scanner?.resume()
+    }
+
+    inner class AsyncDataUpdate : AsyncTask<String, Void, String>() {
+        override fun doInBackground(vararg p0: String?): String {
+            return p0[0]!!
+        }
+
+        override fun onPostExecute(result: String) {
+            var type: String = if (this@MainActivity.isUnloadingChart.matches(result)) {
+                "Unloading chart"
+            } else if (this@MainActivity.isLoadingChart.matches(result)) {
+                 "Loading chart"
+            } else if (this@MainActivity.isPalletTagOld.matches(result)) {
+                "Pallet tag old"
+            } else if (this@MainActivity.isPalletTag.matches(result)) {
+                "Pallet tag"
+            } else if (this@MainActivity.isRack.matches(result)) {
+                "Rack"
+            } else {
+                ""
+            }
+
+            if (!type.isNullOrEmpty()) {
+                this@MainActivity.lstBarcode.add(0, mapOf("barcode" to result, "type" to type))
+                this@MainActivity.setAdapter()
+            }
+        }
+    }
+
+    override fun onBarcodeScan(barcode: String) {
+        AsyncDataUpdate().execute(barcode)
+    }
+
+    override fun onStatus(message: String) {
+        object : AsyncTask<String, Void, String>() {
+            override fun doInBackground(vararg p0: String?): String {
+                return p0[0]!!
+            }
+
+            override fun onPostExecute(result: String?) {
+                this@MainActivity.tvStatus?.text = "Status: ${result}"
+            }
+        }.execute(message)
     }
 }
